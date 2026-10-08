@@ -1,0 +1,5 @@
+pyside6>=6.8
+pyvmomi>=8.0,<9  # 8.x passt zu ESXi 7/8; 9.x hat Deserialisierungs-Probleme
+paramiko>=3.4
+keyring>=25.0
+requests>=2.31

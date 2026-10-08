@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESXi Auto Backupper</title>
+<meta name="description" content="Windows-App, die laufende ESXi-VMs automatisch auf einen anderen ESXi-Host sichert – als Ersatz für den manuellen VMware vCenter Converter.">
+<meta property="og:title" content="ESXi Auto Backupper">
+<meta property="og:description" content="Laufende ESXi-VMs automatisch und regelmäßig auf einen anderen Host sichern.">
+<meta property="og:image" content="https://fmatsch.ist/esxi-auto-backupper/icon.png">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/png" href="favicon.png">
+<style>
+  :root {
+    --bg: #f6f5f1; --surface: #ffffff; --text: #1c1b19; --muted: #6b6860;
+    --line: #e4e1d9; --accent: #c2410c; --chip: #efede6;
+    --shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px -12px rgba(0,0,0,.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141413; --surface: #1d1c1a; --text: #f1efe9; --muted: #a19d93;
+      --line: #2e2c29; --accent: #fb923c; --chip: #272522;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141413; --surface: #1d1c1a; --text: #f1efe9; --muted: #a19d93;
+    --line: #2e2c29; --accent: #fb923c; --chip: #272522;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.6 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 16px; }
+  .crumb { padding: 20px 0 0; font-size: 14px; color: var(--muted); }
+  .crumb a { text-decoration: none; }
+  .crumb a:hover { color: var(--accent); }
+
+  .hero { display: flex; gap: 28px; align-items: center; padding: 48px 0 32px; flex-wrap: wrap; }
+  .hero img.icon { width: 112px; height: 112px; border-radius: 26px; box-shadow: var(--shadow); flex: none; }
+  .hero h1 { font-size: clamp(32px, 6vw, 52px); letter-spacing: -0.03em; line-height: 1.05; margin: 0 0 12px; }
+  .hero p { margin: 0; color: var(--muted); font-size: 18px; max-width: 54ch; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 24px 0 0; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
+    padding: 11px 20px; border-radius: 12px; font-weight: 600; font-size: 16px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--text);
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .dl-meta { font-size: 13px; color: var(--muted); margin-top: 10px; min-height: 1.2em; }
+
+  figure { margin: 24px 0 8px; }
+  figure img {
+    display: block; width: 100%; height: auto; border-radius: 14px;
+    border: 1px solid var(--line); box-shadow: var(--shadow);
+  }
+  figcaption { font-size: 13px; color: var(--muted); margin-top: 8px; }
+
+  h2 {
+    font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); margin: 56px 0 16px; padding-bottom: 10px; border-bottom: 1px solid var(--line);
+  }
+  .steps { counter-reset: s; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; padding: 0; margin: 0; list-style: none; }
+  .steps li {
+    counter-increment: s; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px 18px; box-shadow: var(--shadow); font-size: 15px;
+  }
+  .steps li::before {
+    content: counter(s); display: grid; place-items: center; width: 26px; height: 26px;
+    border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px; margin-bottom: 10px;
+  }
+  .steps b { display: block; margin-bottom: 2px; }
+  .steps span { color: var(--muted); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; box-shadow: var(--shadow); }
+  .card h3 { margin: 0 0 6px; font-size: 16px; letter-spacing: -0.01em; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+
+  .note { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 12px; padding: 16px 20px; box-shadow: var(--shadow); }
+  .note p { margin: 0 0 10px; } .note p:last-child { margin: 0; }
+  ul.plain { margin: 0; padding-left: 20px; color: var(--muted); }
+  ul.plain li { margin: 6px 0; } ul.plain b { color: var(--text); }
+  code { background: var(--chip); padding: 1px 6px; border-radius: 6px; font-size: .92em; }
+
+  footer {
+    border-top: 1px solid var(--line); margin-top: 64px; padding: 28px 0 48px;
+    color: var(--muted); font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between;
+  }
+  footer a { color: var(--muted); } footer a:hover { color: var(--accent); }
+  @media (max-width: 480px) { .hero { padding-top: 32px; } .hero img.icon { width: 84px; height: 84px; border-radius: 20px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="crumb"><a href="https://fmatsch.ist/">← fmatsch.ist</a></div>
+
+  <header class="hero">
+    <img class="icon" src="icon.png" alt="" width="112" height="112">
+    <div>
+      <h1>ESXi Auto Backupper</h1>
+      <p>Sichert laufende VMs von einem ESXi-Host auf einen anderen – automatisch und regelmäßig. Der Ersatz für den manuellen Weg über den VMware vCenter Converter.</p>
+      <div class="actions">
+        <a class="btn primary" id="dl" href="https://github.com/fmatsch/esxi-auto-backupper/releases/latest">⬇ Für Windows herunterladen</a>
+        <a class="btn" href="https://github.com/fmatsch/esxi-auto-backupper">Quellcode auf GitHub</a>
+      </div>
+      <div class="dl-meta" id="dl-meta">Windows 10/11 · ESXi 7.0 und 8.0 · kostenlos, MIT-Lizenz</div>
+    </div>
+  </header>
+
+  <figure>
+    <img src="screenshot.png" alt="Hauptfenster: Quellsystem links, Zielsystem rechts, darunter Jobliste und Log" width="1180" height="800">
+    <figcaption>Quelle links, Ziel rechts. (Screenshot mit Beispieldaten)</figcaption>
+  </figure>
+
+  <h2>So funktioniert ein Backup</h2>
+  <ol class="steps">
+    <li><b>Snapshot</b><span>Die VM läuft weiter, ihre Disks werden eingefroren.</span></li>
+    <li><b>Kopieren</b><span>Die Dateien laufen durch den PC auf den Ziel-Datastore.</span></li>
+    <li><b>Registrieren</b><span>Die Kopie erscheint ausgeschaltet auf dem Ziel-Host – mit deinem Hardware-Profil.</span></li>
+    <li><b>Aufräumen</b><span>Snapshot weg, alte Backups nach deiner Aufbewahrungsregel gelöscht.</span></li>
+  </ol>
+
+  <h2>Funktionen</h2>
+  <div class="grid">
+    <div class="card"><h3>Quelle links, Ziel rechts</h3><p>Hosts verbinden, VM und Datastore anklicken, Job anlegen. Mehr nicht.</p></div>
+    <div class="card"><h3>Hardware-Profil</h3><p>CPU, RAM, Netzwerk-Zuordnung und neue MAC/UUID einmal festlegen – gilt für alle künftigen Jobs.</p></div>
+    <div class="card"><h3>Zeitpläne</h3><p>Manuell, alle N Stunden, täglich oder wöchentlich – in der App oder über den Windows-Taskplaner.</p></div>
+    <div class="card"><h3>Auch ohne Lizenz</h3><p>Bei der kostenlosen ESXi-Lizenz (API read-only) weicht die App automatisch auf SSH aus.</p></div>
+    <div class="card"><h3>Aufbewahrung</h3><p>Die letzten N Backups bleiben, ältere werden gelöscht. Laufende VMs fasst die App nie an.</p></div>
+    <div class="card"><h3>Sicher aufgeräumt</h3><p>Bei Fehlern verschwinden Snapshot und halbfertiger Zielordner. Passwörter liegen im Windows-Credential-Manager.</p></div>
+  </div>
+
+  <h2>Gut zu wissen</h2>
+  <div class="note">
+    <p><b>Bitte zuerst mit einer Test-VM ausprobieren.</b> Die App ist durch Tests mit simulierten Hosts abgesichert, aber noch nicht breit an echter Hardware erprobt. Ein Backup ist erst dann eines, wenn die Wiederherstellung geklappt hat.</p>
+  </div>
+  <ul class="plain" style="margin-top:16px">
+    <li><b>Volle Disk-Größe:</b> Auch Thin-Disks werden in voller provisionierter Größe übertragen (wie beim Converter). Die Dauer richtet sich nach Disk-Größe und Netzwerk.</li>
+    <li><b>SmartScreen:</b> Die Exe ist nicht code-signiert, Windows warnt beim ersten Start. Sie wird bei jedem Release öffentlich auf GitHub aus dem Quellcode gebaut; Prüfsummen liegen bei.</li>
+    <li><b>Zertifikate:</b> ESXi nutzt meist selbstsignierte Zertifikate, die App akzeptiert sie. Nur in vertrauenswürdigen Netzen einsetzen.</li>
+    <li><b>Nicht unterstützt:</b> Disks außerhalb des VM-Ordners (andere Datastores, RDM).</li>
+  </ul>
+
+  <footer>
+    <span>© <span id="year">2026</span> Florian Matscheko · MIT-Lizenz</span>
+    <span><a href="https://github.com/fmatsch/esxi-auto-backupper">GitHub</a> · <a href="https://fmatsch.ist/">fmatsch.ist</a></span>
+  </footer>
+</div>
+<script>
+  document.getElementById("year").textContent = new Date().getFullYear();
+  // Direktlink und Version des neuesten Releases anzeigen; ohne Netz/Release bleibt der statische Link.
+  fetch("https://api.github.com/repos/fmatsch/esxi-auto-backupper/releases/latest")
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(rel => {
+      const exe = (rel.assets || []).find(a => a.name === "EsxiBackupper.exe");
+      if (exe) {
+        document.getElementById("dl").href = exe.browser_download_url;
+        const mb = Math.round(exe.size / 1048576);
+        document.getElementById("dl-meta").textContent =
+          `${rel.tag_name} · EsxiBackupper.exe (${mb} MB) · Windows 10/11 · ESXi 7.0 und 8.0 · MIT-Lizenz`;
+      }
+    })
+    .catch(() => {});
+</script>
+</body>
+</html>

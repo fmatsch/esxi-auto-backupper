@@ -1,0 +1,100 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest tests -q
+
+  windows-exe:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Version mit Tag abgleichen
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $code = (Select-String -Path esxi_backupper/__init__.py -Pattern '__version__ = "(.+)"').Matches[0].Groups[1].Value
+          $tag = "${{ github.ref_name }}".TrimStart("v")
+          if ($code -ne $tag) { throw "Tag v$tag passt nicht zu __version__ $code" }
+
+      - run: pip install -r requirements.txt pyinstaller
+      - name: Exe bauen
+        run: pyinstaller --noconfirm --distpath dist --workpath build/_work build/win.spec
+
+      - name: Selbsttest der Konsolen-Exe (Module, Qt, Schlüsselbund, Icon)
+        shell: pwsh
+        run: |
+          .\dist\EsxiBackupperCli.exe --selftest
+          if ($LASTEXITCODE -ne 0) { throw "Selbsttest fehlgeschlagen ($LASTEXITCODE)" }
+          .\dist\EsxiBackupperCli.exe --list-jobs
+          if ($LASTEXITCODE -ne 0) { throw "--list-jobs fehlgeschlagen ($LASTEXITCODE)" }
+
+      - name: GUI-Exe startet und läuft
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $p = Start-Process -FilePath .\dist\EsxiBackupper.exe -PassThru
+          Start-Sleep -Seconds 12
+          if ($p.HasExited) { throw "GUI-Exe ist sofort beendet (Exit-Code $($p.ExitCode))" }
+          Stop-Process -Id $p.Id -Force
+
+      - name: Prüfsummen
+        shell: pwsh
+        run: |
+          Get-ChildItem dist\*.exe | ForEach-Object {
+            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$h  $($_.Name)"
+          } | Out-File -Encoding ascii dist\SHA256SUMS.txt
+          Get-Content dist\SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EsxiBackupper-Windows
+          path: |
+            dist/EsxiBackupper.exe
+            dist/EsxiBackupperCli.exe
+            dist/SHA256SUMS.txt
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows-exe
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: EsxiBackupper-Windows
+          path: dist
+      - name: Release erstellen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/* \
+            --repo "${{ github.repository }}" \
+            --title "ESXi Auto Backupper ${{ github.ref_name }}" \
+            --generate-notes

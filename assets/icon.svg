@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#1f3170"/><stop offset="1" stop-color="#0b1230"/></linearGradient>
+<linearGradient id="bar" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#eaf2ff"/><stop offset="1" stop-color="#b7c9ee"/></linearGradient>
+<linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#34d399"/><stop offset="1" stop-color="#38bdf8"/></linearGradient>
+<radialGradient id="glow" cx=".5" cy=".42" r=".6">
+<stop offset="0" stop-color="#3b82f6" stop-opacity=".45"/><stop offset="1" stop-color="#3b82f6" stop-opacity="0"/></radialGradient>
+</defs>
+<rect width="512" height="512" rx="112" fill="url(#bg)"/>
+<rect width="512" height="512" rx="112" fill="url(#glow)"/>
+<path d="M87.9 181.2 A184 184 0 0 1 401.0 142.7" fill="none" stroke="url(#ring)" stroke-width="26" stroke-linecap="round"/><path d="M441.6 194.7 L426.4 110.2 L363.3 159.5Z" fill="#34d399"/><path d="M424.1 330.8 A184 184 0 0 1 111.0 369.3" fill="none" stroke="url(#ring)" stroke-width="26" stroke-linecap="round"/><path d="M70.4 317.3 L85.6 401.8 L148.7 352.5Z" fill="#34d399"/>
+<rect x="152" y="146" width="208" height="56" rx="14" fill="url(#bar)"/><circle cx="182" cy="174" r="9" fill="#34d399"/><rect x="208" y="167" width="80" height="14" rx="7" fill="#9db4e0" opacity=".55"/><rect x="300" y="167" width="36" height="14" rx="7" fill="#9db4e0" opacity=".35"/><rect x="152" y="214" width="208" height="56" rx="14" fill="url(#bar)"/><circle cx="182" cy="242" r="9" fill="#38bdf8"/><rect x="208" y="235" width="80" height="14" rx="7" fill="#9db4e0" opacity=".55"/><rect x="300" y="235" width="36" height="14" rx="7" fill="#9db4e0" opacity=".35"/><rect x="152" y="282" width="208" height="56" rx="14" fill="url(#bar)"/><circle cx="182" cy="310" r="9" fill="#34d399"/><rect x="208" y="303" width="80" height="14" rx="7" fill="#9db4e0" opacity=".55"/><rect x="300" y="303" width="36" height="14" rx="7" fill="#9db4e0" opacity=".35"/>
+</svg>
