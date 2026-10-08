@@ -45,12 +45,12 @@ def main() -> None:
     cfg = AppConfig(jobs=[
         BackupJob(name="Fileserver nachts", source_host=src, source_vm="srv-files01",
                   target_host=dst, target_datastore="backup-ssd",
-                  schedule=Schedule(mode="daily", time_of_day="22:00"),
+                  schedule=Schedule(mode="daily", time_of_day="22:00"), retention_count=4,
                   last_run=(now - timedelta(hours=11)).isoformat(timespec="seconds"),
                   last_status="ok"),
         BackupJob(name="Webserver wöchentlich", source_host=src, source_vm="srv-web02",
                   target_host=dst, target_datastore="backup-hdd",
-                  schedule=Schedule(mode="weekly", weekday=6, time_of_day="03:00"),
+                  schedule=Schedule(mode="weekly", weekday=6, time_of_day="03:00"), retention_count=3,
                   last_run=(now - timedelta(days=3)).isoformat(timespec="seconds"),
                   last_status="ok"),
     ])
@@ -90,11 +90,13 @@ def main() -> None:
     win.log.append("Quell-VM 'srv-files01' gefunden: [datastore1] srv-files01/srv-files01.vmx")
     win.log.append("Erstelle Snapshot 'AutoBackup_3f9a1c' (mit Quiesce) ...")
     win.log.append("Lege Zielordner an: [backup-ssd] srv-files01_backup_20261008_220000")
-    win.log.append("3 Dateien zu kopieren, gesamt 120.0 GB (Thin-Disks werden in voller Größe übertragen)")
-    win.log.append("[2/3] srv-files01-flat.vmdk (120.0 GB) ...")
+    win.log.append("Thin-Export: 41.2 GB belegt von 120.0 GB - übertragen wird nur der belegte Teil.")
+    win.log.append("Thin-Export Disk 1/1 (srv-files01.vmdk): exportiere auf dem Quell-Host ...")
+    win.log.append("  Export srv-files01.vmdk: 100%")
+    win.log.append("Thin-Export Disk 1/1 (srv-files01.vmdk): übertrage 21 Dateien ...")
     win.log.update_progress(TransferProgress(
-        file_name="srv-files01-flat.vmdk", file_index=2, file_count=3,
-        bytes_done=int(71.5 * GB), bytes_total=120 * GB, rate_bps=112 * 1024 * 1024))
+        file_name="d1-s014.vmdk", file_index=14, file_count=21,
+        bytes_done=int(1.1 * GB), bytes_total=2 * GB, rate_bps=112 * 1024 * 1024))
 
     win.show()
     app.processEvents()

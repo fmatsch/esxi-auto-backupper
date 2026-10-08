@@ -25,19 +25,18 @@ import threading
 from datetime import datetime
 from typing import Callable, Optional
 
-from . import vmx_editor
+from . import versions, vmx_editor
 from .config import BackupJob, HardwareProfile
-from .esxi_client import ApiReadOnlyError, EsxiClient, EsxiError, split_datastore_path
+from .esxi_client import (
+    ApiReadOnlyError, Cancelled, EsxiClient, EsxiError, split_datastore_path,
+)
 from .ssh_client import EsxiSshClient
+from .thin import DiskChain, ThinTransfer
 from .transfer import ProgressCallback, copy_datastore_file, format_bytes
+from .versions import TIMESTAMP_FMT as _TIMESTAMP_FMT
+from .versions import sanitize_name
 
 LogCallback = Callable[[str], None]
-
-_TIMESTAMP_FMT = "%Y%m%d_%H%M%S"
-
-
-def sanitize_name(name: str) -> str:
-    return re.sub(r'[\\/:*?"<>|\s]+', "_", name).strip("_")
 
 
 class BackupPipeline:
@@ -64,6 +63,7 @@ class BackupPipeline:
         self._target_folder_created: Optional[tuple[str, str]] = None  # (ds, folder)
         self._registered = False
         self._descriptor_paths: set[str] = set()
+        self._disk_chains: list[DiskChain] = []
         self._vmx_target_rel = ""
 
     def log(self, msg: str) -> None:
@@ -102,7 +102,7 @@ class BackupPipeline:
         # target_vm_folder dient als Namenspräfix; der Zeitstempel gehört immer
         # dazu, damit sich Läufe nie gegenseitig überschreiben (Retention räumt auf).
         timestamp = datetime.now().strftime(_TIMESTAMP_FMT)
-        base_name = sanitize_name(job.target_vm_folder or job.source_vm)
+        base_name = versions.backup_base_name(job)
         target_name = f"{base_name}_backup_{timestamp}"
         target_folder = target_name
 
@@ -113,6 +113,7 @@ class BackupPipeline:
             files, disk_map = self._resolve_disk_chains(entries, vmx_ds, src_folder)
             self._add_nvram(entries, vmx_ds, src_folder, files)
             self._prepare_target_folder(job.target_datastore, target_folder)
+            self._thin_transfer(files, vmx_ds, job.target_datastore, target_folder)
             self._copy_files(vmx_ds, files, job.target_datastore, target_folder)
             self._upload_vmx(entries, disk_map, target_name,
                              job.target_datastore, target_folder)
@@ -188,6 +189,9 @@ class BackupPipeline:
                 disk_map[ref] = chain_start
 
             # Kette ab chain_start bis zur Basis einsammeln
+            chain = DiskChain(name=posixpath.basename(chain_start),
+                              descriptor_rel=posixpath.normpath(
+                                  posixpath.join(src_folder, chain_start)))
             current = chain_start
             seen = set()
             while current:
@@ -197,12 +201,22 @@ class BackupPipeline:
                 cur_rel = posixpath.normpath(posixpath.join(src_folder, current))
                 cur_text = self.source.download_text(ds, cur_rel)
                 files[cur_rel] = posixpath.basename(current)
+                chain.files[cur_rel] = posixpath.basename(current)
                 self._descriptor_paths.add(cur_rel)
+                extent_rels = []
                 for extent in vmx_editor.descriptor_extents(cur_text):
                     ext_rel = posixpath.normpath(posixpath.join(src_folder, extent))
                     files[ext_rel] = posixpath.basename(extent)
+                    chain.files[ext_rel] = posixpath.basename(extent)
+                    chain.extents.append(ext_rel)
+                    extent_rels.append(ext_rel)
                 nxt = vmx_editor.descriptor_parent(cur_text)
+                if not nxt:
+                    chain.base_extents = extent_rels
                 current = posixpath.basename(nxt) if nxt else None
+
+            if parent is not None:      # nur Disks mit Snapshot sind eingefroren und exportierbar
+                self._disk_chains.append(chain)
 
         return files, disk_map
 
@@ -230,6 +244,36 @@ class BackupPipeline:
             self._target_fallback().make_directory(ds, folder)
         self._target_folder_created = (ds, folder)
 
+    def _thin_transfer(self, files: dict[str, str], src_ds: str,
+                       dst_ds: str, dst_folder: str) -> None:
+        """Überträgt Thin-Disks per SSH-Export/-Import; sonst bleibt alles beim HTTP-Weg.
+
+        Erfolgreich übertragene Ketten werden aus `files` entfernt. Jeder Fehler
+        außer einem Abbruch führt zum vollständigen Transfer (Fallback).
+        """
+        mode = self.job.transfer_mode
+        if mode != "auto" or not self._disk_chains:
+            return
+        thin = ThinTransfer(self.job.id, self.source, self.target,
+                            self.source_ssh, self.target_ssh,
+                            self.log, self.progress, self.cancel)
+        try:
+            reason = thin.check(self._disk_chains, src_ds, dst_ds)
+            if reason:
+                self.log(f"Thin-Export übersprungen: {reason}. "
+                         "Disks werden vollständig übertragen.")
+                return
+            thin.run(self._disk_chains, src_ds, dst_ds, dst_folder)
+        except Cancelled:
+            raise
+        except EsxiError as e:
+            self.log(f"WARNUNG: Thin-Export fehlgeschlagen ({e}). "
+                     "Weiter mit vollständiger Übertragung.")
+            return
+        for chain in self._disk_chains:
+            for rel in chain.files:
+                files.pop(rel, None)
+
     def _copy_files(self, src_ds: str, files: dict[str, str],
                     dst_ds: str, dst_folder: str) -> None:
         # Deskriptoren (klein, Text) zuletzt hochladen wäre egal - wir kopieren
@@ -241,11 +285,11 @@ class BackupPipeline:
             sizes[src_rel] = self.source.file_size(src_ds, src_rel)
             total += sizes[src_rel]
         self.log(f"{len(items)} Dateien zu kopieren, gesamt {format_bytes(total)} "
-                 "(Thin-Disks werden in voller Größe übertragen)")
+                 "(volle Größe, Thin-Disks werden dabei nicht verkleinert)")
 
         for idx, (src_rel, dst_name) in enumerate(items, start=1):
             if self.cancel.is_set():
-                raise EsxiError("Backup abgebrochen.")
+                raise Cancelled("Backup abgebrochen.")
             dst_rel = f"{dst_folder}/{dst_name}"
             size = sizes[src_rel]
             self.log(f"[{idx}/{len(items)}] {dst_name} ({format_bytes(size)}) ...")
@@ -297,26 +341,21 @@ class BackupPipeline:
                 self.job.source_vm, self.snapshot_name)
 
     def _apply_retention(self, base_name: str, keep_name: str) -> None:
+        """Behält die neuesten N Versionen; laufende Backup-VMs werden nie gelöscht."""
         n = max(1, self.job.retention_count)
-        prefix = f"{base_name}_backup_"
-        backups = [v for v in self.target.list_vms()
-                   if v.name.startswith(prefix) and v.power_state != "poweredOn"]
-        backups.sort(key=lambda v: v.name)  # Timestamp im Namen ist sortierbar
-        to_delete = backups[:-n] if len(backups) > n else []
-        for old in to_delete:
+        candidates = [info for _, info in versions.list_versions(self.target, self.job)
+                      if info.power_state != "poweredOn"]      # neueste zuerst
+        for old in reversed(candidates[n:]):      # älteste zuerst
             if old.name == keep_name:
                 continue
-            self.log(f"Retention: entferne altes Backup '{old.name}' ...")
+            self.log(f"Aufbewahrung ({n} Versionen): entferne älteste Version "
+                     f"'{old.name}' ...")
             try:
-                vm = self.target.get_vm(old.name)
-                self.target.destroy_vm(vm)
-            except ApiReadOnlyError:
-                ssh = self._target_fallback()
-                ds, rel = split_datastore_path(old.vmx_path)
-                ssh.unregister_vm(old.name)
-                ssh.delete_path(ds, posixpath.dirname(rel))
+                versions.delete_version(self.target, self.target_ssh, old, self.log)
+            except Cancelled:
+                raise
             except EsxiError as e:
-                self.log(f"WARNUNG: Altes Backup '{old.name}' konnte nicht "
+                self.log(f"WARNUNG: Alte Version '{old.name}' konnte nicht "
                          f"entfernt werden: {e}")
 
     def _cleanup_after_failure(self, vm) -> None:

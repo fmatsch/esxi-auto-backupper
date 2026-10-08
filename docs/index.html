@@ -135,7 +135,8 @@
     <div class="card"><h3>Hardware-Profil</h3><p>CPU, RAM, Netzwerk-Zuordnung und neue MAC/UUID einmal festlegen – gilt für alle künftigen Jobs.</p></div>
     <div class="card"><h3>Zeitpläne</h3><p>Manuell, alle N Stunden, täglich oder wöchentlich – in der App oder über den Windows-Taskplaner.</p></div>
     <div class="card"><h3>Auch ohne Lizenz</h3><p>Bei der kostenlosen ESXi-Lizenz (API read-only) weicht die App automatisch auf SSH aus.</p></div>
-    <div class="card"><h3>Aufbewahrung</h3><p>Die letzten N Backups bleiben, ältere werden gelöscht. Laufende VMs fasst die App nie an.</p></div>
+    <div class="card"><h3>Versionen aufbewahren</h3><p>Pro Job einstellen, wie viele Versionen bleiben (z. B. 4). Die Versionsverwaltung zeigt alle und löscht einzelne. Gelöscht wird erst nach einem erfolgreichen Backup.</p></div>
+    <div class="card"><h3>Schnell bei großen Thin-Disks</h3><p>Per SSH wird nur der belegte Teil übertragen. Fehlt SSH oder gibt es ein Problem, läuft automatisch der vollständige Weg.</p></div>
     <div class="card"><h3>Sicher aufgeräumt</h3><p>Bei Fehlern verschwinden Snapshot und halbfertiger Zielordner. Passwörter liegen im Windows-Credential-Manager.</p></div>
   </div>
 
@@ -144,7 +145,7 @@
     <p><b>Bitte zuerst mit einer Test-VM ausprobieren.</b> Die App ist durch Tests mit simulierten Hosts abgesichert, aber noch nicht breit an echter Hardware erprobt. Ein Backup ist erst dann eines, wenn die Wiederherstellung geklappt hat.</p>
   </div>
   <ul class="plain" style="margin-top:16px">
-    <li><b>Volle Disk-Größe:</b> Auch Thin-Disks werden in voller provisionierter Größe übertragen (wie beim Converter). Die Dauer richtet sich nach Disk-Größe und Netzwerk.</li>
+    <li><b>Transfergröße:</b> Ohne SSH wird auch bei Thin-Disks die volle provisionierte Größe übertragen (wie beim Converter). Der schnelle Thin-Export braucht SSH auf beiden Hosts und temporär freien Platz; er ist bisher nur mit simulierten Hosts getestet.</li>
     <li><b>SmartScreen:</b> Die Exe ist nicht code-signiert, Windows warnt beim ersten Start. Sie wird bei jedem Release öffentlich auf GitHub aus dem Quellcode gebaut; Prüfsummen liegen bei.</li>
     <li><b>Zertifikate:</b> ESXi nutzt meist selbstsignierte Zertifikate, die App akzeptiert sie. Nur in vertrauenswürdigen Netzen einsetzen.</li>
     <li><b>Nicht unterstützt:</b> Disks außerhalb des VM-Ordners (andere Datastores, RDM).</li>

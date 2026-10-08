@@ -12,10 +12,14 @@ from __future__ import annotations
 
 import re
 import shlex
+import socket
+import threading
+import time
+from typing import Callable, Optional
 
 import paramiko
 
-from .esxi_client import EsxiError
+from .esxi_client import Cancelled, EsxiError
 
 
 class SshError(EsxiError):
@@ -53,15 +57,57 @@ class EsxiSshClient:
             self._client.close()
             self._client = None
 
-    def run(self, command: str, timeout: int = 600) -> str:
+    def ensure_connected(self) -> None:
         if not self._client:
             self.connect()
-        _, stdout, stderr = self._client.exec_command(command, timeout=timeout)
-        rc = stdout.channel.recv_exit_status()
-        out = stdout.read().decode("utf-8", errors="replace")
-        err = stderr.read().decode("utf-8", errors="replace")
+
+    def _exec(
+        self,
+        command: str,
+        timeout: Optional[float] = 600,
+        on_output: Optional[Callable[[str], None]] = None,
+        cancel: Optional[threading.Event] = None,
+        pty: bool = False,
+    ) -> tuple[int, str]:
+        """Führt einen Befehl aus und liest die Ausgabe laufend (kein Puffer-Stau).
+
+        stderr wird mit stdout zusammengeführt. Mit pty=True bekommt der Prozess
+        beim Schließen des Kanals ein SIGHUP - so lässt sich ein langer
+        vmkfstools-Lauf per Abbruch tatsächlich beenden.
+        """
+        self.ensure_connected()
+        chan = self._client.get_transport().open_session()
+        try:
+            if pty:
+                chan.get_pty()
+            chan.set_combine_stderr(True)
+            chan.settimeout(1.0)
+            chan.exec_command(command)
+            deadline = None if timeout is None else time.monotonic() + timeout
+            parts: list[str] = []
+            while True:
+                if cancel is not None and cancel.is_set():
+                    raise Cancelled("Backup abgebrochen.")
+                if deadline is not None and time.monotonic() > deadline:
+                    raise SshError(f"Zeitüberschreitung nach {int(timeout)} s: {command}")
+                try:
+                    data = chan.recv(65536)
+                except socket.timeout:
+                    continue
+                if not data:
+                    break
+                text = data.decode("utf-8", errors="replace")
+                parts.append(text)
+                if on_output:
+                    on_output(text)
+            return chan.recv_exit_status(), "".join(parts)
+        finally:
+            chan.close()
+
+    def run(self, command: str, timeout: Optional[float] = 600) -> str:
+        rc, out = self._exec(command, timeout)
         if rc != 0:
-            raise SshError(f"SSH-Befehl fehlgeschlagen (rc={rc}): {command}\n{err or out}")
+            raise SshError(f"SSH-Befehl fehlgeschlagen (rc={rc}): {command}\n{out}")
         return out
 
     # --- vim-cmd Helfer -------------------------------------------------------
@@ -87,7 +133,7 @@ class EsxiSshClient:
 
     def remove_all_snapshots(self, vm_name: str) -> None:
         vmid = self.vm_id_by_name(vm_name)
-        self.run(f"vim-cmd vmsvc/snapshot.removeall {vmid}", timeout=3600)
+        self.run(f"vim-cmd vmsvc/snapshot.removeall {vmid}", timeout=None)
 
     def remove_snapshot_by_name(self, vm_name: str, snap_name: str) -> bool:
         """Entfernt gezielt einen Snapshot (lässt fremde Snapshots unangetastet)."""
@@ -108,7 +154,7 @@ class EsxiSshClient:
         if snap_id is None:
             return False
         # snapshot.remove <vmid> <snapshotId> - konsolidiert automatisch
-        self.run(f"vim-cmd vmsvc/snapshot.remove {vmid} {snap_id}", timeout=3600)
+        self.run(f"vim-cmd vmsvc/snapshot.remove {vmid} {snap_id}", timeout=None)
         return True
 
     def register_vm(self, vmx_absolute_path: str, name: str) -> None:
@@ -146,3 +192,62 @@ class EsxiSshClient:
 
     def __exit__(self, *exc):
         self.disconnect()
+
+    # --- Thin-Export / -Import (vmkfstools) -----------------------------------
+
+    def has_command(self, name: str) -> bool:
+        q = shlex.quote(name)
+        rc, _ = self._exec(
+            f"command -v {q} >/dev/null 2>&1 || test -x /sbin/{q} || test -x /bin/{q}",
+            timeout=30)
+        return rc == 0
+
+    def allocated_bytes(self, paths: list[str]) -> int:
+        """Tatsächlich belegter Platz der Dateien (bei Thin-Disks << logische Größe)."""
+        if not paths:
+            return 0
+        out = self.run("du -k " + " ".join(shlex.quote(p) for p in paths), timeout=120)
+        sizes = [int(m.group(1)) for m in re.finditer(r"^(\d+)\s", out, re.MULTILINE)]
+        if len(sizes) != len(paths):
+            raise SshError(f"Unerwartete 'du'-Ausgabe: {out.strip()[:200]}")
+        return sum(sizes) * 1024
+
+    def list_dir(self, path: str) -> list[str]:
+        out = self.run(f"ls -1 {shlex.quote(path)}", timeout=60)
+        return [line.strip() for line in out.splitlines() if line.strip()]
+
+    def clone_disk(
+        self,
+        src_abs: str,
+        dst_abs: str,
+        disk_format: str,
+        progress: Optional[Callable[[int], None]] = None,
+        cancel: Optional[threading.Event] = None,
+    ) -> None:
+        """vmkfstools -i <src> -d <format> <dst>; meldet Prozent-Fortschritt."""
+        if disk_format not in ("thin", "2gbsparse"):
+            raise SshError(f"Nicht erlaubtes Disk-Format: {disk_format}")
+        last = {"pct": -1, "tail": ""}
+
+        def on_output(text: str) -> None:
+            last["tail"] = (last["tail"] + text)[-400:]
+            for m in re.finditer(r"(\d+)% done", text):
+                pct = int(m.group(1))
+                if pct > last["pct"]:
+                    last["pct"] = pct
+                    if progress:
+                        progress(pct)
+
+        cmd = (f"vmkfstools -i {shlex.quote(src_abs)} -d {disk_format} "
+               f"{shlex.quote(dst_abs)}")
+        rc, out = self._exec(cmd, timeout=None, on_output=on_output,
+                             cancel=cancel, pty=True)
+        if rc != 0:
+            raise SshError(f"vmkfstools fehlgeschlagen (rc={rc}): {last['tail'].strip()}")
+
+    def delete_file(self, absolute_path: str) -> None:
+        """Löscht eine einzelne Datei unterhalb von /vmfs/volumes (keine Platzhalter)."""
+        if (not absolute_path.startswith("/vmfs/volumes/") or ".." in absolute_path
+                or any(c in absolute_path for c in "*?[")):
+            raise SshError(f"Verweigert: unsicherer Dateipfad '{absolute_path}'")
+        self.run(f"rm -f {shlex.quote(absolute_path)}", timeout=60)

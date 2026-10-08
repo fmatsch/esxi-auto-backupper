@@ -48,15 +48,32 @@ class JobDialog(QDialog):
         form.addRow("Job-Name:", self.edit_name)
 
         self.edit_folder = QLineEdit(j.target_vm_folder)
-        self.edit_folder.setPlaceholderText(
-            "leer = VM-Name  (Ergebnis: <Präfix>_backup_<Zeitstempel>)")
+        self.edit_folder.setPlaceholderText("leer = VM-Name")
+        self.edit_folder.setToolTip("Backups heißen <Präfix>_backup_<Zeitstempel>.")
         form.addRow("Namenspräfix:", self.edit_folder)
 
         self.spin_retention = QSpinBox()
-        self.spin_retention.setRange(1, 20)
+        self.spin_retention.setRange(1, 99)
         self.spin_retention.setValue(j.retention_count)
-        self.spin_retention.setSuffix(" Backup(s)")
-        form.addRow("Aufbewahren:", self.spin_retention)
+        self.spin_retention.setSuffix(" Version(en)")
+        self.spin_retention.setToolTip(
+            "So viele Backup-Versionen dieser VM bleiben auf dem Ziel erhalten.\n"
+            "Nach einem erfolgreichen Backup wird die älteste überzählige gelöscht.\n"
+            "Während des Backups existieren kurzzeitig N+1 Versionen - der Ziel-\n"
+            "Datastore braucht dafür Platz.")
+        form.addRow("Versionen aufbewahren:", self.spin_retention)
+
+        self.combo_transfer = QComboBox()
+        self.combo_transfer.addItem(
+            "Automatisch - schnell per SSH, wenn möglich", "auto")
+        self.combo_transfer.addItem(
+            "Immer vollständig (nur HTTP, kein SSH nötig)", "full")
+        self.combo_transfer.setCurrentIndex(1 if j.transfer_mode == "full" else 0)
+        self.combo_transfer.setToolTip(
+            "Automatisch: Bei Thin-Disks und SSH auf beiden Hosts wird nur der belegte\n"
+            "Teil übertragen (Export/Import mit vmkfstools). Sonst oder bei Problemen\n"
+            "wird automatisch vollständig übertragen.")
+        form.addRow("Übertragung:", self.combo_transfer)
 
         self.chk_quiesce = QCheckBox(
             "Dateisystem einfrieren (Quiesce, braucht VMware Tools)")
@@ -146,6 +163,7 @@ class JobDialog(QDialog):
         j.name = self.edit_name.text().strip() or j.source_vm
         j.target_vm_folder = self.edit_folder.text().strip()
         j.retention_count = self.spin_retention.value()
+        j.transfer_mode = self.combo_transfer.currentData()
         j.quiesce = self.chk_quiesce.isChecked()
         j.hardware = self._hardware
         t = self.time_edit.time()

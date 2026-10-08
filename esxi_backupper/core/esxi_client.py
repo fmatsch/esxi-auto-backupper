@@ -31,6 +31,10 @@ class EsxiError(Exception):
     pass
 
 
+class Cancelled(EsxiError):
+    """Vom Benutzer abgebrochen (wird nie durch Fallbacks 'wegrepariert')."""
+
+
 class ApiReadOnlyError(EsxiError):
     """Write-API vom Host abgelehnt (kostenlose Lizenz)."""
 

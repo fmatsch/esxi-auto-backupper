@@ -73,6 +73,7 @@ class BackupJob:
     schedule: Schedule = field(default_factory=Schedule)
     retention_count: int = 2        # so viele Backup-VMs auf dem Ziel behalten
     quiesce: bool = True            # Snapshot mit Quiesce versuchen (braucht VMware Tools)
+    transfer_mode: str = "auto"     # auto: Thin-Export per SSH wenn möglich | full: immer vollständig per HTTP
     use_windows_task: bool = False  # läuft über den Taskplaner -> interner Scheduler überspringt den Job
     last_run: str = ""              # ISO-Timestamp des letzten Laufs
     last_status: str = ""           # ok | error | running

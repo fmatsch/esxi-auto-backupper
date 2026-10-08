@@ -12,10 +12,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from .esxi_client import CHUNK_SIZE, EsxiClient, EsxiError
+from .esxi_client import CHUNK_SIZE, Cancelled, EsxiClient, EsxiError
 
 
-class TransferCancelled(EsxiError):
+class TransferCancelled(Cancelled):
     pass
 
 

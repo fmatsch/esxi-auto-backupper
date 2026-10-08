@@ -12,9 +12,9 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Callable, Iterator, Optional
 
-from . import credentials
+from . import credentials, versions
 from .config import BackupJob, config_dir, find_job, load_config, save_config
-from .esxi_client import EsxiClient, EsxiError
+from .esxi_client import EsxiClient, EsxiError, VmInfo
 from .job import BackupPipeline
 from .ssh_client import EsxiSshClient
 from .transfer import ProgressCallback
@@ -67,6 +67,53 @@ def _password_for(host_cfg) -> str:
             "Bitte in der App einmal mit 'Passwort speichern' verbinden."
         )
     return pw
+
+
+def list_job_versions(job: BackupJob) -> list[tuple[datetime, VmInfo]]:
+    """Alle Backup-Versionen des Jobs auf dem Ziel-Host (neueste zuerst)."""
+    client = EsxiClient(job.target_host.address, job.target_host.username,
+                        _password_for(job.target_host), job.target_host.port)
+    client.connect()
+    try:
+        return versions.list_versions(client, job)
+    finally:
+        client.disconnect()
+
+
+def delete_job_versions(job: BackupJob, vm_names: list[str],
+                        log: Optional[Callable[[str], None]] = None) -> list[str]:
+    """Löscht die genannten Versionen. Gibt Fehlermeldungen zurück (leer = alles gelöscht).
+
+    Hält die Job-Sperre: während ein Backup läuft, wird nichts gelöscht.
+    """
+    with job_lock(job.id):
+        pw = _password_for(job.target_host)
+        client = EsxiClient(job.target_host.address, job.target_host.username,
+                            pw, job.target_host.port)
+        ssh = None
+        if job.target_host.use_ssh_fallback:
+            ssh_pw = credentials.get_password(job.target_host.address,
+                                              job.target_host.username, ssh=True) or pw
+            ssh = EsxiSshClient(job.target_host.address, job.target_host.username,
+                                ssh_pw, job.target_host.ssh_port)
+        errors: list[str] = []
+        client.connect()
+        try:
+            known = {info.name: info for _, info in versions.list_versions(client, job)}
+            for name in vm_names:
+                info = known.get(name)
+                if info is None:
+                    errors.append(f"'{name}' gehört nicht (mehr) zu diesem Job.")
+                    continue
+                try:
+                    versions.delete_version(client, ssh, info, log)
+                except EsxiError as e:
+                    errors.append(f"{name}: {e}")
+        finally:
+            client.disconnect()
+            if ssh:
+                ssh.disconnect()
+        return errors
 
 
 def _store_status(job: BackupJob) -> None:

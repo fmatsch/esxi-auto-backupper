@@ -11,7 +11,7 @@ import threading
 import pytest
 
 from esxi_backupper.core.config import BackupJob, HardwareProfile, HostConfig
-from esxi_backupper.core.esxi_client import ApiReadOnlyError, EsxiError
+from esxi_backupper.core.esxi_client import ApiReadOnlyError, DatastoreInfo, EsxiError
 from esxi_backupper.core.job import BackupPipeline, sanitize_name
 
 
@@ -78,12 +78,16 @@ class FakeEsxiClient:
         self.snapshots: dict[str, list[str]] = {}    # vm_name -> [snap_names]
         self.destroyed: list[str] = []
         self.vm_infos: list[FakeVmInfo] = []
+        self.free_space = 10 ** 13
 
     def _check_writable(self):
         if not self.api_writable:
             raise ApiReadOnlyError("read-only")
 
     # Inventar
+    def list_datastores(self):
+        return [DatastoreInfo(ds, 10 ** 13, self.free_space, "VMFS") for ds in self.files]
+
     def get_vm(self, name):
         if name not in self.vms:
             raise EsxiError(f"VM '{name}' nicht gefunden.")
@@ -133,6 +137,7 @@ class FakeEsxiClient:
     def destroy_vm(self, vm):
         self._check_writable()
         self.destroyed.append(vm.config.name)
+        self.vm_infos = [i for i in self.vm_infos if i.name != vm.config.name]
 
     def make_directory(self, ds, folder):
         self._check_writable()

@@ -18,11 +18,15 @@ from ..core.config import AppConfig, BackupJob, find_job, load_config, save_conf
 from .hardware_dialog import HardwareDialog
 from .host_panel import HostPanel
 from .job_dialog import JobDialog
+from .versions_dialog import VersionsDialog
 from .log_widget import LogWidget
 from .workers import JobWorker
 
-_JOB_COLUMNS = ["Name", "Quelle", "Ziel", "Zeitplan", "Letzter Lauf",
+_JOB_COLUMNS = ["Name", "Quelle", "Ziel", "Zeitplan", "Versionen", "Letzter Lauf",
                 "Status", "Nächster Lauf"]
+
+
+_STATUS_COL = _JOB_COLUMNS.index("Status")
 
 
 class MainWindow(QMainWindow):
@@ -94,12 +98,14 @@ class MainWindow(QMainWindow):
         self.btn_run.clicked.connect(self._run_selected)
         self.btn_edit = QPushButton("Bearbeiten")
         self.btn_edit.clicked.connect(self._edit_selected)
+        self.btn_versions = QPushButton("Versionen ...")
+        self.btn_versions.clicked.connect(self._show_versions)
         self.btn_delete = QPushButton("Löschen")
         self.btn_delete.clicked.connect(self._delete_selected)
         self.btn_cancel = QPushButton("Abbrechen")
         self.btn_cancel.clicked.connect(self._cancel_running)
         self.btn_cancel.setEnabled(False)
-        for b in (self.btn_run, self.btn_edit, self.btn_delete):
+        for b in (self.btn_run, self.btn_edit, self.btn_versions, self.btn_delete):
             b.setEnabled(False)
             btn_row.addWidget(b)
         btn_row.addWidget(self.btn_cancel)
@@ -140,6 +146,7 @@ class MainWindow(QMainWindow):
         running = self.worker is not None
         self.btn_run.setEnabled(has_sel and not running)
         self.btn_edit.setEnabled(has_sel)
+        self.btn_versions.setEnabled(has_sel)
         self.btn_delete.setEnabled(has_sel and not running)
 
     def _selected_job(self) -> BackupJob | None:
@@ -201,6 +208,11 @@ class MainWindow(QMainWindow):
             self.log.append(f"Windows-Taskplaner-Task für '{job.name}' entfernt.")
         save_config(self.config)
 
+    def _show_versions(self):
+        job = self._selected_job()
+        if job:
+            VersionsDialog(job, self).exec()
+
     def _delete_selected(self):
         job = self._selected_job()
         if not job:
@@ -232,6 +244,7 @@ class MainWindow(QMainWindow):
                 f"{job.source_vm} @ {job.source_host.address}",
                 f"[{job.target_datastore}] @ {job.target_host.address}",
                 sched.describe(job.schedule),
+                f"{job.retention_count} aufbewahren",
                 job.last_run.replace("T", " ") if job.last_run else "-",
                 status,
                 nxt.strftime("%d.%m.%Y %H:%M") if nxt else "-",
@@ -240,9 +253,9 @@ class MainWindow(QMainWindow):
                 item = QTableWidgetItem(v)
                 if c == 0:
                     item.setData(Qt.ItemDataRole.UserRole, job.id)
-                if c == 5 and job.last_status == "error":
+                if c == _STATUS_COL and job.last_status == "error":
                     item.setForeground(Qt.GlobalColor.red)
-                if c == 5 and job.last_status == "ok":
+                if c == _STATUS_COL and job.last_status == "ok":
                     item.setForeground(Qt.GlobalColor.darkGreen)
                 self.table.setItem(r, c, item)
         self.table.resizeColumnsToContents()
